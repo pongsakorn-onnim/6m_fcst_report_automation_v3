@@ -1,0 +1,47 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+
+# --- Virtual env ---
+.venv/
+venv/
+ENV/
+env/
+
+# --- OS / IDE ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# --- Logs ---
+logs/
+*.log
+
+# --- Outputs & Temp Files ---
+output/
+inspection_pages/
+~$*.pptx
+.cache/
+tmp/
+temp/
+
+# --- PPTX Files ---
+# ข้ามไฟล์ PPTX ทั้งหมด (เช่นไฟล์ที่ gen ออกมา)
+*.pptx
+# แต่ให้อัปโหลดไฟล์ใน templates ได้
+!templates/*.pptx
+
+# --- Project Specific Artifacts ---
+/project_tree.txt
+config.yaml
+
+# --- PyInstaller ---
+build/
+dist/
+*.spec
+*.zip
+*.7z
+*.exe
