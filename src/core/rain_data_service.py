@@ -20,6 +20,16 @@ logger = logging.getLogger(__name__)
 
 ZoneType = Literal["Region", "Basin"]
 
+# FIRST_REGI in the shapefile uses full names with ภาค prefix,
+# but the template table rows use the short form without it.
+_REGION_NAME_MAP = {
+    "ภาคเหนือ":               "เหนือ",
+    "ภาคตะวันออกเฉียงเหนือ":  "ตะวันออกเฉียงเหนือ",
+    "ภาคกลาง":                "กลาง",
+    "ภาคตะวันออก":            "ตะวันออก",
+    "ภาคใต้ฝั่งตะวันออก":    "ใต้ฝั่งตะวันออก",
+    "ภาคใต้ฝั่งตะวันตก":     "ใต้ฝั่งตะวันตก",
+}
 
 THAI_MONTHS = {
     1: "ม.ค.",
@@ -42,15 +52,26 @@ class RainDataService:
     def __init__(self, excel_path: Path):
         if not excel_path.exists():
             raise FileNotFoundError(f"Rain summary file not found: {excel_path}")
+        self.excel_path   = excel_path
+        self._dataframes  = None
 
-        self.excel_path = excel_path
+    @classmethod
+    def from_dataframes(cls, dataframes: dict) -> "RainDataService":
+        """Create from pre-extracted DataFrames (Option B — no Excel file needed)."""
+        instance = cls.__new__(cls)
+        instance.excel_path  = None
+        instance._dataframes = dataframes
+        return instance
 
     # ----------------------------------------------------------
     # Internal
     # ----------------------------------------------------------
 
     def _load_sheet(self, zone_type: ZoneType) -> pd.DataFrame:
-        df = pd.read_excel(self.excel_path, sheet_name=zone_type)
+        if self._dataframes is not None:
+            df = self._dataframes.get(zone_type, pd.DataFrame()).copy()
+        else:
+            df = pd.read_excel(self.excel_path, sheet_name=zone_type)
 
         required_cols = {
             "model",
@@ -102,9 +123,10 @@ class RainDataService:
         if zone_type == "Region":
             code_col = "REG_CODE"
             name_col = "FIRST_REGI"
+            df[name_col] = df[name_col].map(lambda n: _REGION_NAME_MAP.get(n, n))
         else:
             code_col = "MB_CODE"
-            name_col = "MBASIN_N"
+            name_col = "MBASIN_T"
 
         # month headers (unique ordered by lead)
         month_labels = (

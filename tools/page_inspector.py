@@ -1,6 +1,7 @@
 """
 How to run:
-- python tools\page_inspector.py "D:\HII\6m_fcst_report_automation_v3\templates\template.pptx"  
+- Inspect all pages: python tools\page_inspector.py "D:\HII\6m_fcst_report_automation_v3\templates\template.pptx"
+- Inspect specific page: python tools\page_inspector.py "D:\HII\6m_fcst_report_automation_v3\templates\template.pptx" 6  
 """
 #!/usr/bin/env python3
 """
