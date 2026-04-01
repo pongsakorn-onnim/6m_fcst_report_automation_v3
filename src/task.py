@@ -1,16 +1,20 @@
 # src/task.py
 import logging
+from datetime import date
 from pathlib import Path
 from pptx.slide import Slide
 
 from .core.ppt_tools.image_handler import replace_image_by_name
-from .core.ppt_tools.table_handler import fill_rain_table
+from .core.ppt_tools.table_handler import fill_rain_table, fill_rain_diff_table
 from .core.ppt_tools.text_handler import (
     replace_text_by_name,
+    replace_text_paragraphs,
+    update_date_runs,
     get_buddhist_year,
     get_thai_month,
     get_next_months,
     format_month_range,
+    format_month_range_long,
 )
 
 logger = logging.getLogger(__name__)
@@ -30,10 +34,9 @@ def _update_month_labels(slide: Slide, months: list) -> bool:
     return ok
 
 
-def _update_6month_texts(slide: Slide, init_year: int, init_month: int) -> bool:
-    """Update txt_header (month range only) and txt_month_t1…t6."""
-    months = get_next_months(init_year, init_month, 6)
-    ok = replace_text_by_name(slide, "txt_header", format_month_range(months))
+def _update_6month_texts(slide: Slide, months: list, header: str) -> bool:
+    """Update txt_header and txt_month_t1…t6. Caller supplies the full header string."""
+    ok = replace_text_by_name(slide, "txt_header", header)
     if not _update_month_labels(slide, months):
         ok = False
     return ok
@@ -53,6 +56,36 @@ def _log_result(tag: str, ok: bool) -> None:
         logger.info(f"[{tag}] updated successfully.")
     else:
         logger.warning(f"[{tag}] finished with one or more failures — check logs above.")
+
+
+# ──────────────────────────────────────────────
+# Page 1 — cover slide
+# Shapes: txt_month_range, txt_report_date
+# ──────────────────────────────────────────────
+def update_cover_slide(slide: Slide, year: int, month: int) -> bool:
+    """Page 1 — update month range banner and report date with today's date."""
+    months = get_next_months(year, month, 6)
+    today = date.today()
+    ok = replace_text_by_name(slide, "txt_month_range", format_month_range_long(months))
+    if not update_date_runs(slide, "txt_report_date", today.day, today.month, today.year):
+        ok = False
+    _log_result("cover_slide", ok)
+    return ok
+
+
+# ──────────────────────────────────────────────
+# Page 2 — summary slide
+# Shapes: txt_header
+# ──────────────────────────────────────────────
+def update_summary_slide(slide: Slide, year: int, month: int) -> bool:
+    """Page 2 — update header with forecast month range."""
+    months = get_next_months(year, month, 6)
+    ok = replace_text_by_name(
+        slide, "txt_header",
+        f"สรุปคาดการณ์ฝน {format_month_range_long(months)}",
+    )
+    _log_result("summary_slide", ok)
+    return ok
 
 
 # ──────────────────────────────────────────────
@@ -100,7 +133,9 @@ def update_hii_monthly(
 ) -> bool:
     """tag_hii_monthly — คาดการณ์ฝนรายเดือน สสน."""
     logger.info("Updating HII monthly forecast")
-    ok = _update_6month_texts(slide, init_year, init_month)
+    months = get_next_months(init_year, init_month, 6)
+    header = f"คาดการณ์ฝน สสน. เดือน{format_month_range(months)}"
+    ok = _update_6month_texts(slide, months, header)
     if not _replace_6_images(slide, "hii", paths):
         ok = False
     _log_result("tag_hii_monthly", ok)
@@ -119,7 +154,9 @@ def update_hii_anom_monthly(
 ) -> bool:
     """tag_hii_anom_monthly — ความผิดปกติฝนรายเดือน สสน."""
     logger.info("Updating HII anomaly monthly")
-    ok = _update_6month_texts(slide, init_year, init_month)
+    months = get_next_months(init_year, init_month, 6)
+    header = f"คาดการณ์ฝน สสน. เทียบกับค่าเฉลี่ย 30 ปี (2534-2563) เดือน{format_month_range(months)}"
+    ok = _update_6month_texts(slide, months, header)
     if not _replace_6_images(slide, "hii_anom", paths):
         ok = False
     if tbl_data:
@@ -141,7 +178,9 @@ def update_om_monthly(
 ) -> bool:
     """tag_om_monthly — คาดการณ์ฝนรายเดือน One Map Mean"""
     logger.info("Updating One Map mean monthly forecast")
-    ok = _update_6month_texts(slide, init_year, init_month)
+    months = get_next_months(init_year, init_month, 6)
+    header = f"คาดการณ์ฝน One Map แบบถ่วงน้ำหนัก เดือน{format_month_range(months)}"
+    ok = _update_6month_texts(slide, months, header)
     if not _replace_6_images(slide, "om", paths):
         ok = False
     _log_result("tag_om_monthly", ok)
@@ -160,7 +199,11 @@ def update_om_anom_monthly(
 ) -> bool:
     """tag_om_anom_monthly — ความผิดปกติฝนรายเดือน One Map Mean"""
     logger.info("Updating One Map mean anomaly monthly")
-    ok = _update_6month_texts(slide, init_year, init_month)
+    months = get_next_months(init_year, init_month, 6)
+    header = f"คาดการณ์ฝน One Map แบบถ่วงน้ำหนัก เทียบกับค่าเฉลี่ย 30 ปี (2534-2563) เดือน{format_month_range(months)}"
+    ok = _update_6month_texts(slide, months, header)
+    if not replace_text_by_name(slide, "txt_tbl_title", "ตารางแสดงผลต่างจากฝนคาดการณ์ One Map แบบถ่วงน้ำหนัก กับค่าเฉลี่ย 30 ปี รายภาค"):
+        ok = False
     if not _replace_6_images(slide, "om_anom", paths):
         ok = False
     if tbl_data:
@@ -182,7 +225,9 @@ def update_om_upper_monthly(
 ) -> bool:
     """tag_om_upper_monthly — คาดการณ์ฝนรายเดือน One Map Upper"""
     logger.info("Updating One Map upper monthly forecast")
-    ok = _update_6month_texts(slide, init_year, init_month)
+    months = get_next_months(init_year, init_month, 6)
+    header = f"คาดการณ์ฝนสูงสุด One Map เดือน{format_month_range(months)}"
+    ok = _update_6month_texts(slide, months, header)
     if not _replace_6_images(slide, "om_upper", paths):
         ok = False
     _log_result("tag_om_upper_monthly", ok)
@@ -201,7 +246,11 @@ def update_om_upper_anom_monthly(
 ) -> bool:
     """tag_om_upper_anom_monthly — ความผิดปกติฝนรายเดือน One Map Upper"""
     logger.info("Updating One Map upper anomaly monthly")
-    ok = _update_6month_texts(slide, init_year, init_month)
+    months = get_next_months(init_year, init_month, 6)
+    header = f"คาดการณ์ฝนสูงสุด One Map เทียบกับค่าเฉลี่ย 30 ปี (2534-2563) เดือน{format_month_range(months)}"
+    ok = _update_6month_texts(slide, months, header)
+    if not replace_text_by_name(slide, "txt_tbl_title", "ตารางแสดงผลต่างจากฝนคาดการณ์สูงสุด One Map แบบถ่วงน้ำหนัก กับค่าเฉลี่ย 30 ปี รายภาค"):
+        ok = False
     if not _replace_6_images(slide, "om_upper_anom", paths):
         ok = False
     if tbl_data:
@@ -223,7 +272,9 @@ def update_om_lower_monthly(
 ) -> bool:
     """tag_om_lower_monthly — คาดการณ์ฝนรายเดือน One Map Lower"""
     logger.info("Updating One Map lower monthly forecast")
-    ok = _update_6month_texts(slide, init_year, init_month)
+    months = get_next_months(init_year, init_month, 6)
+    header = f"คาดการณ์ฝนต่ำสุด One Map เดือน{format_month_range(months)}"
+    ok = _update_6month_texts(slide, months, header)
     if not _replace_6_images(slide, "om_lower", paths):
         ok = False
     _log_result("tag_om_lower_monthly", ok)
@@ -242,7 +293,9 @@ def update_om_lower_anom_monthly(
 ) -> bool:
     """tag_om_lower_anom_monthly — ความผิดปกติฝนรายเดือน One Map Lower"""
     logger.info("Updating One Map lower anomaly monthly")
-    ok = _update_6month_texts(slide, init_year, init_month)
+    months = get_next_months(init_year, init_month, 6)
+    header = f"คาดการณ์ฝนต่ำสุด One Map เทียบกับค่าเฉลี่ย 30 ปี (2534-2563) เดือน{format_month_range(months)}"
+    ok = _update_6month_texts(slide, months, header)
     if not _replace_6_images(slide, "om_lower_anom", paths):
         ok = False
     if tbl_data:
@@ -300,9 +353,10 @@ def update_obs_vs_hii(
     slide: Slide,
     obs_year: int,
     obs_month: int,
-    path_fcst: Path | str,   # avg30y monthly (reference context image)
+    path_fcst: Path | str,   # HII forecast lead-0 (init=obs_month, target=obs_month)
     path_obs: Path | str,    # observed monthly
     path_diff: Path | str,   # diff: HII fcst – observed
+    tbl_data: dict | None = None,
 ) -> bool:
     """tag_obs_vs_hii — เปรียบเทียบฝนตรวจวัดรายเดือน กับคาดการณ์ สสน."""
     thai_month = get_thai_month(obs_month)
@@ -310,14 +364,22 @@ def update_obs_vs_hii(
     logger.info(f"Updating obs_vs_hii: {thai_month} {thai_year}")
     ok = replace_text_by_name(
         slide, "txt_header",
-        f"เปรียบเทียบฝนตรวจวัด เดือน{thai_month} {thai_year} กับคาดการณ์ฝน สสน.",
+        f"เปรียบเทียบฝนตรวจวัดเดือน{thai_month} {thai_year} กับคาดการณ์ฝน สสน.",
     )
+    if not replace_text_by_name(
+        slide, "txt_tbl_title",
+        f"ตารางแสดงผลต่างของฝนตรวจวัดเดือน{thai_month} {thai_year} กับคาดการณ์ฝน สสน. (รายภาค)",
+    ):
+        ok = False
     for shape_name, path in {
         "pic_fcst": path_fcst,
         "pic_obs":  path_obs,
         "pic_diff": path_diff,
     }.items():
         if not replace_image_by_name(slide, shape_name, path):
+            ok = False
+    if tbl_data:
+        if not fill_rain_diff_table(slide, "tbl_region_diff", tbl_data):
             ok = False
     _log_result("tag_obs_vs_hii", ok)
     return ok
@@ -334,6 +396,7 @@ def update_obs_vs_tmd(
     path_fcst: Path | str,   # TMD forecast monthly
     path_obs: Path | str,    # observed monthly
     path_diff: Path | str,   # diff: TMD fcst – observed
+    tbl_data: dict | None = None,
 ) -> bool:
     """tag_obs_vs_tmd — เปรียบเทียบฝนตรวจวัดรายเดือน กับคาดการณ์ กรมอุตุฯ"""
     thai_month = get_thai_month(obs_month)
@@ -341,14 +404,22 @@ def update_obs_vs_tmd(
     logger.info(f"Updating obs_vs_tmd: {thai_month} {thai_year}")
     ok = replace_text_by_name(
         slide, "txt_header",
-        f"เปรียบเทียบฝนตรวจวัด เดือน{thai_month} {thai_year} กับคาดการณ์ฝน กรมอุตุฯ",
+        f"เปรียบเทียบฝนตรวจวัดเดือน{thai_month} {thai_year} กับคาดการณ์ฝน กรมอุตุฯ",
     )
+    if not replace_text_by_name(
+        slide, "txt_tbl_title",
+        f"ตารางแสดงผลต่างของฝนตรวจวัดเดือน{thai_month} {thai_year} กับคาดการณ์ฝน กรมอุตุฯ (รายภาค)",
+    ):
+        ok = False
     for shape_name, path in {
         "pic_fcst": path_fcst,
         "pic_obs":  path_obs,
         "pic_diff": path_diff,
     }.items():
         if not replace_image_by_name(slide, shape_name, path):
+            ok = False
+    if tbl_data:
+        if not fill_rain_diff_table(slide, "tbl_region_diff", tbl_data):
             ok = False
     _log_result("tag_obs_vs_tmd", ok)
     return ok
@@ -365,6 +436,7 @@ def update_obs_vs_om(
     path_fcst: Path | str,   # One Map Mean forecast monthly
     path_obs: Path | str,    # observed monthly
     path_diff: Path | str,   # diff: OM fcst – observed
+    tbl_data: dict | None = None,
 ) -> bool:
     """tag_obs_vs_om — เปรียบเทียบฝนตรวจวัดรายเดือน กับคาดการณ์ One Map"""
     thai_month = get_thai_month(obs_month)
@@ -372,14 +444,22 @@ def update_obs_vs_om(
     logger.info(f"Updating obs_vs_om: {thai_month} {thai_year}")
     ok = replace_text_by_name(
         slide, "txt_header",
-        f"เปรียบเทียบฝนตรวจวัด เดือน{thai_month} {thai_year} กับคาดการณ์ฝน One Map",
+        f"เปรียบเทียบฝนตรวจวัดเดือน{thai_month} {thai_year} กับคาดการณ์ฝน One Map แบบถ่วงน้ำหนัก",
     )
+    if not replace_text_by_name(
+        slide, "txt_tbl_title",
+        f"ตารางแสดงผลต่างของฝนตรวจวัดเดือน{thai_month} {thai_year} กับคาดการณ์ฝน One Map แบบถ่วงน้ำหนัก (รายภาค)",
+    ):
+        ok = False
     for shape_name, path in {
         "pic_fcst": path_fcst,
         "pic_obs":  path_obs,
         "pic_diff": path_diff,
     }.items():
         if not replace_image_by_name(slide, shape_name, path):
+            ok = False
+    if tbl_data:
+        if not fill_rain_diff_table(slide, "tbl_region_diff", tbl_data):
             ok = False
     _log_result("tag_obs_vs_om", ok)
     return ok
@@ -432,7 +512,7 @@ def update_obs_vs_avg(
     logger.info(f"Updating obs_vs_avg: {thai_month} {thai_year}")
     ok = replace_text_by_name(
         slide, "txt_header",
-        f"เปรียบเทียบฝนตรวจวัด เดือน{thai_month} {thai_year} กับค่าเฉลี่ย 30 ปี",
+        f"เปรียบเทียบฝนตรวจวัดเดือน{thai_month} {thai_year} กับค่าเฉลี่ย 30 ปี (2534-2563)",
     )
     for shape_name, path in {
         "pic_avg":  path_avg,
@@ -581,7 +661,7 @@ def update_om_basin_monthly(
     """tag_om_basin_monthly — คาดการณ์ฝน One Map รายลุ่มน้ำ"""
     months = get_next_months(init_year, init_month, 6)
     header = (
-        f"คาดการณ์ฝน One Map และผลต่างจากค่าเฉลี่ย 30 ปี (2534-2563) "
+        f"คาดการณ์ฝน One Map แบบถ่วงน้ำหนัก และผลต่างจากค่าเฉลี่ย 30 ปี (2534-2563) "
         f"รายลุ่มน้ำ เดือน{format_month_range(months)}"
     )
     logger.info("Updating OM basin monthly")
@@ -602,7 +682,7 @@ def update_om_basin_tbl(
     """tag_om_basin_tbl — ตารางฝนคาดการณ์ One Map รายลุ่มน้ำ"""
     months = get_next_months(init_year, init_month, 6)
     header = (
-        f"ตารางแสดงผลต่างจากค่าปกติของปริมาณฝนคาดการณ์ One Map "
+        f"ตารางแสดงผลต่างจากค่าปกติของปริมาณฝนคาดการณ์ One Map แบบถ่วงน้ำหนัก "
         f"รายลุ่มน้ำ เดือน{format_month_range(months)}"
     )
     logger.info("Updating OM basin table")

@@ -148,14 +148,14 @@ def _build_data_cell(tc: etree._Element, anomaly: float, pct: float) -> None:
         p.append(_xml_run("th-TH", "ไม่เกิน \u00b11", color_inner))
         p.append(_xml_run("en-US", "%",               color_inner))
     else:
-        anom_str = f"{int(round(anomaly)):+d}"
         pct_str  = f"{int(round(pct)):+d}"
-        # Two lines: anom + <br> + (pct%)
-        # Use a single en-US run for each line (matches template format and
-        # avoids inter-run spacing from language-boundary switching).
-        p.append(_xml_run("en-US", anom_str,           color_inner))
+        # Line 1: mm value — use "ไม่เกิน ±1 มม." if anomaly rounds to zero
+        if int(round(anomaly)) == 0:
+            p.append(_xml_run("th-TH", "ไม่เกิน \u00b11 มม.", color_inner))
+        else:
+            p.append(_xml_run("en-US", f"{int(round(anomaly)):+d}", color_inner))
         p.append(_xml_br(color_inner))
-        p.append(_xml_run("en-US", f"({pct_str}%)",   color_inner))
+        p.append(_xml_run("en-US", f"({pct_str}%)", color_inner))
 
 
 # ──────────────────────────────────────────────────────────
@@ -203,6 +203,95 @@ def _normalize_table_layout(table, shape_name: str) -> None:
 # ──────────────────────────────────────────────────────────
 # Public API
 # ──────────────────────────────────────────────────────────
+
+def fill_rain_diff_table(
+    slide: Slide,
+    shape_name: str,
+    name_to_data: dict,
+) -> bool:
+    """
+    Fill a 2-column observed-vs-forecast diff table (Group 2.10.1–2.10.3).
+
+    Args:
+        slide:        Target slide.
+        shape_name:   Name of the table shape (e.g. 'tbl_region_diff').
+        name_to_data: {thai_name: {"anomaly": float, "percent": float}}
+
+    Returns True if all data rows were matched and written successfully.
+    """
+    table_shape = next(
+        (s for s in slide.shapes if s.name == shape_name and s.has_table),
+        None,
+    )
+    if table_shape is None:
+        logger.warning(f"Table shape '{shape_name}' not found on slide.")
+        return False
+
+    table = table_shape.table
+    ok = True
+
+    for row_idx in range(1, len(table.rows)):
+        name_cell = table.cell(row_idx, 0)
+        row_name  = name_cell.text_frame.text.strip()
+
+        if row_name not in name_to_data:
+            logger.warning(f"[{shape_name}] Name '{row_name}' not found in data — row skipped.")
+            ok = False
+            continue
+
+        val = name_to_data[row_name]
+        anomaly = float(val["anomaly"])
+        pct     = float(val["percent"])
+
+        tc = table.cell(row_idx, 1)._tc
+
+        # Determine styling
+        if pct >= 1.0:
+            color_inner = _COLOR_POSITIVE
+            fill_xml    = _FILL_POSITIVE
+        elif pct <= -1.0:
+            color_inner = _COLOR_NEGATIVE
+            fill_xml    = _FILL_NEGATIVE
+        else:
+            color_inner = _COLOR_NEAR_ZERO
+            fill_xml    = _FILL_NEAR_ZERO
+
+        # Update cell background fill
+        tcPr = tc.find(f"{_A}tcPr")
+        if tcPr is not None:
+            for old_fill in tcPr.findall(f"{_A}solidFill"):
+                tcPr.remove(old_fill)
+            tcPr.append(etree.fromstring(fill_xml))
+
+        # Rebuild paragraph
+        txBody = tc.find(f"{_A}txBody")
+        if txBody is None:
+            continue
+        p = txBody.find(f"{_A}p")
+        if p is None:
+            continue
+
+        pPr = p.find(f"{_A}pPr")
+        pPr_copy = deepcopy(pPr) if pPr is not None else None
+        for child in list(p):
+            p.remove(child)
+        if pPr_copy is not None:
+            p.append(pPr_copy)
+
+        if -1.0 < pct < 1.0:
+            p.append(_xml_run("th-TH", "ไม่เกิน \u00b11", color_inner))
+            p.append(_xml_run("en-US", "%",               color_inner))
+        else:
+            pct_str = f"{int(round(pct)):+d}"
+            if int(round(anomaly)) == 0:
+                p.append(_xml_run("th-TH", "ไม่เกิน \u00b11 มม.", color_inner))
+            else:
+                p.append(_xml_run("en-US", f"{int(round(anomaly)):+d}", color_inner))
+            p.append(_xml_br(color_inner))
+            p.append(_xml_run("en-US", f"({pct_str}%)", color_inner))
+
+    return ok
+
 
 def fill_rain_table(
     slide: Slide,

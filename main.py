@@ -7,7 +7,7 @@ from src.core.config import settings
 from src.core.logging_config import setup_logging
 from src.core.output_manager import OutputManager, OutputSpec
 from src.core.ppt_tools.text_handler import get_next_months
-from src.core.rain_data_service import RainDataService
+from src.core.rain_data_service import RainDataService, build_obs_diff_table
 from src.manager import ReportManager
 
 from rain_services.analog_year_service import AnalogYearService
@@ -19,6 +19,8 @@ if str(settings.paths.extract_pkg_dir) not in sys.path:
 from api import run_extraction
 
 from src.task import (
+    update_cover_slide,
+    update_summary_slide,
     update_fcst_vs_avg,
     update_yearly_forecast,
     # group 2.12
@@ -74,27 +76,55 @@ def main(year: int, month: int) -> None:
     # Pre-compute t1–t6 target months once; reused for all monthly slides
     target_months = get_next_months(year, month, 6)
 
-    # --- Rain data extraction (Option B: in-process, no Excel intermediate) ---
-    rain_svc = None
+    # --- Rain data for forecast tables (2.7, 2.8, 2.9, 2.12) ---
+    # Try pre-extracted Excel first; fall back to raster extraction if missing.
     tbl_region_hii  = tbl_region_om   = None
     tbl_region_om_u = tbl_region_om_l = None
     tbl_basin_hii   = tbl_basin_om    = None
     tbl_basin_om_u  = tbl_basin_om_l  = None
-    try:
-        logger.info("Running rainfall extraction...")
-        rain_data = run_extraction(year, month)
-        rain_svc  = RainDataService.from_dataframes(rain_data)
-        tbl_region_hii  = rain_svc.build_table("Region", "HII")
-        tbl_region_om   = rain_svc.build_table("Region", "OM_M")
-        tbl_region_om_u = rain_svc.build_table("Region", "OM_U")
-        tbl_region_om_l = rain_svc.build_table("Region", "OM_L")
-        tbl_basin_hii   = rain_svc.build_table("Basin",  "HII")
-        tbl_basin_om    = rain_svc.build_table("Basin",  "OM_M")
-        tbl_basin_om_u  = rain_svc.build_table("Basin",  "OM_U")
-        tbl_basin_om_l  = rain_svc.build_table("Basin",  "OM_L")
-        logger.info("Rainfall extraction complete.")
-    except Exception as e:
-        logger.warning(f"Rainfall extraction failed — tables will be skipped: {e}")
+
+    def _build_forecast_tables(svc: RainDataService) -> bool:
+        nonlocal tbl_region_hii, tbl_region_om, tbl_region_om_u, tbl_region_om_l
+        nonlocal tbl_basin_hii,  tbl_basin_om,  tbl_basin_om_u,  tbl_basin_om_l
+        tbl_region_hii  = svc.build_table("Region", "HII")
+        tbl_region_om   = svc.build_table("Region", "OM_M")
+        tbl_region_om_u = svc.build_table("Region", "OM_U")
+        tbl_region_om_l = svc.build_table("Region", "OM_L")
+        tbl_basin_hii   = svc.build_table("Basin",  "HII")
+        tbl_basin_om    = svc.build_table("Basin",  "OM_M")
+        tbl_basin_om_u  = svc.build_table("Basin",  "OM_U")
+        tbl_basin_om_l  = svc.build_table("Basin",  "OM_L")
+
+    excel_path = settings.paths.spatial_rain_extract_dir / f"rain_summary_{year}{month:02d}.xlsx"
+    if excel_path.exists():
+        logger.info(f"Loading pre-extracted data: {excel_path.name}")
+        try:
+            _build_forecast_tables(RainDataService(excel_path))
+        except Exception as e:
+            logger.warning(f"Pre-extracted Excel failed: {e} — falling back to raster extraction")
+
+    if tbl_region_hii is None:
+        logger.info("Running raster extraction (this may take a while)...")
+        try:
+            rain_data = run_extraction(year, month)
+            _build_forecast_tables(RainDataService.from_dataframes(rain_data))
+            logger.info("Raster extraction complete.")
+        except Exception as e:
+            logger.warning(f"Raster extraction failed — forecast tables will be skipped: {e}")
+
+    # ------------------------------------------------------------------
+    # Page 1 — cover slide
+    # ------------------------------------------------------------------
+    slide = _get_slide(report, "tag_cover")
+    if slide:
+        update_cover_slide(slide=slide, year=year, month=month)
+
+    # ------------------------------------------------------------------
+    # Page 2 — summary slide
+    # ------------------------------------------------------------------
+    slide = _get_slide(report, "tag_summary")
+    if slide:
+        update_summary_slide(slide=slide, year=year, month=month)
 
     # ------------------------------------------------------------------
     # tag_fcst_yearly — yearly forecast
@@ -305,9 +335,10 @@ def main(year: int, month: int) -> None:
             slide      = slide,
             obs_year   = obs_year,
             obs_month  = obs_month,
-            path_fcst  = builder.build_avg30y_monthly(obs_month),
+            path_fcst  = builder.build_hii_forecast_path(obs_year, obs_month, obs_year, obs_month),
             path_obs   = builder.build_obs_path(obs_year, obs_month),
             path_diff  = builder.build_diff_obs_vs_forecast_path(obs_year, obs_month, "HII"),
+            tbl_data   = build_obs_diff_table("HII", obs_year, obs_month),
         )
 
     for slide, (obs_year, obs_month) in zip(tmd_slides, past_months_210):
@@ -318,6 +349,7 @@ def main(year: int, month: int) -> None:
             path_fcst  = builder.build_tmd_forecast_path(obs_year, obs_month, obs_year, obs_month),
             path_obs   = builder.build_obs_path(obs_year, obs_month),
             path_diff  = builder.build_diff_obs_vs_forecast_path(obs_year, obs_month, "TMD"),
+            tbl_data   = build_obs_diff_table("TMD", obs_year, obs_month),
         )
 
     for slide, (obs_year, obs_month) in zip(om_slides, past_months_210):
@@ -328,6 +360,7 @@ def main(year: int, month: int) -> None:
             path_fcst  = builder.build_onemap_path(obs_year, obs_month, obs_year, obs_month, model_type="MFCST"),
             path_obs   = builder.build_obs_path(obs_year, obs_month),
             path_diff  = builder.build_diff_obs_vs_forecast_path(obs_year, obs_month, "OM"),
+            tbl_data   = build_obs_diff_table("OM", obs_year, obs_month),
         )
 
     for slide, (obs_year, obs_month) in zip(avg_slides, past_months_210):
@@ -350,11 +383,11 @@ def main(year: int, month: int) -> None:
                 slide         = slide,
                 target_year   = m["year"],
                 target_month  = m["month"],
-                path_avg      = builder.build_avg30y_monthly(m["month"]),
-                path_tmd      = builder.build_tmd_forecast_path(year, month, m["year"], m["month"]),
-                path_tmd_anom = builder.build_tmd_forecast_path(year, month, m["year"], m["month"], is_diff=True),
-                path_hii      = builder.build_hii_forecast_path(year, month, m["year"], m["month"]),
-                path_hii_anom = builder.build_hii_forecast_path(year, month, m["year"], m["month"], is_diff=True),
+                path_avg      = builder.build_avg30y_monthly(m["month"], area="country"),
+                path_tmd      = builder.build_tmd_forecast_path(year, month, m["year"], m["month"], area="country"),
+                path_tmd_anom = builder.build_tmd_forecast_path(year, month, m["year"], m["month"], is_diff=True, area="country"),
+                path_hii      = builder.build_hii_forecast_path(year, month, m["year"], m["month"], area="country"),
+                path_hii_anom = builder.build_hii_forecast_path(year, month, m["year"], m["month"], is_diff=True, area="country"),
             )
 
     # ------------------------------------------------------------------

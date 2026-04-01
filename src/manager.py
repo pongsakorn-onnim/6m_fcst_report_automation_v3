@@ -26,6 +26,22 @@ def _patch_rids(element, rId_map: dict) -> None:
                 el.set(attr, rId_map[val])
 
 
+def _replace_element_inplace(target, source) -> None:
+    """
+    Copy source element's content into target, preserving target's object identity.
+    Needed because slide.element and slide.part._element may be separate references —
+    assigning new_part._element = new_element would leave slide.element stale.
+    """
+    target.clear()
+    target.tag = source.tag
+    target.text = source.text
+    target.tail = source.tail
+    for k, v in source.attrib.items():
+        target.set(k, v)
+    for child in source:
+        target.append(copy.deepcopy(child))
+
+
 class ReportManager:
     """
     ผู้จัดการไฟล์ PowerPoint
@@ -118,10 +134,14 @@ class ReportManager:
             new_rId = new_part.relate_to(rel.target_part, rel.reltype)
             rId_map[rId] = new_rId
 
-        # 4. Deep-copy source XML, patch rId attributes, replace element
+        # 4. Deep-copy source XML, patch rId attributes, assign to both
+        # part and slide proxy, then clear the lazyproperty cache so
+        # new_slide.shapes reads from the new element (not the cached empty one).
         new_element = copy.deepcopy(source_part._element)
         _patch_rids(new_element, rId_map)
         new_part._element = new_element
+        new_slide._element = new_element
+        new_slide.__dict__.pop("shapes", None)
 
         # 5. Move the new slide to immediately after after_slide
         target_idx = self._slide_index(after_slide) + 1

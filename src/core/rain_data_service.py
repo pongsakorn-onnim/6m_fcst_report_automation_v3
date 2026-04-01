@@ -14,6 +14,7 @@ import logging
 from pathlib import Path
 from typing import Literal
 import pandas as pd
+from rain_services import config as rain_config
 
 
 logger = logging.getLogger(__name__)
@@ -165,3 +166,44 @@ class RainDataService:
             "months": month_labels,
             "rows": rows,
         }
+
+
+def build_obs_diff_table(model: str, year: int, month: int) -> dict:
+    """
+    Load observed-vs-forecast diff data for Group 2.10 directly from
+    pre-extracted Excel files. Independent of RainDataService / raster pipeline.
+
+    Args:
+        model: "HII", "TMD", or "OM"
+        year:  Observed year
+        month: Observed month (1–12)
+
+    Returns:
+        {thai_region_name: {"anomaly": float, "percent": float}}
+    """
+    filename = f"{model}Observe_forecast_region_{year}.xlsx"
+    path = rain_config.DIFF_REGION_EXCEL_DIR / filename
+
+    if not path.exists():
+        logger.warning(f"Obs-diff Excel not found: {path}")
+        return {}
+
+    try:
+        df = pd.read_excel(path, sheet_name="Sheet 1")
+    except Exception as e:
+        logger.error(f"Failed to read {path}: {e}")
+        return {}
+
+    df = df[(df["YEAR"] == year) & (df["MONTH"] == month)]
+    df = df.drop_duplicates(subset=["REG_CODE"], keep="first")
+
+    result = {}
+    for _, row in df.iterrows():
+        raw_name = str(row["FIRST_REGI"]).strip()
+        name = _REGION_NAME_MAP.get(raw_name, raw_name.removeprefix("ภาค"))
+        result[name] = {
+            "anomaly": float(row["obs_fcst"]),
+            "percent": float(row["anom_per"]),
+        }
+
+    return result

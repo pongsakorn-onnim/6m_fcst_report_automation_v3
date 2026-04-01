@@ -1,7 +1,10 @@
 # src/core/ppt_tools/text_handler.py
 import logging
+from copy import deepcopy
 from pptx.slide import Slide
 from pptx.enum.shapes import MSO_SHAPE_TYPE
+
+_A_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +64,20 @@ def format_month_range(months: list[dict]) -> str:
         f"{end['thai_name']} {end['buddhist_year']}"
     )
 
+def format_month_range_long(months: list[dict]) -> str:
+    """Long-form range used on cover/summary: 'เดือนมีนาคม-สิงหาคม ปี 2569'"""
+    if not months:
+        return ""
+    start = months[0]
+    end = months[-1]
+    if start["buddhist_year"] == end["buddhist_year"]:
+        return f"เดือน{start['thai_name']}-{end['thai_name']} ปี {start['buddhist_year']}"
+    return (
+        f"เดือน{start['thai_name']} ปี {start['buddhist_year']}"
+        f" – "
+        f"{end['thai_name']} ปี {end['buddhist_year']}"
+    )
+
 
 # ==========================================
 # 2. ฟังก์ชันจัดการ Text Box บน PowerPoint
@@ -116,4 +133,100 @@ def replace_text_by_name(slide: Slide, shape_name: str, new_text: str) -> bool:
         # ถ้าไม่มีอะไรเลย
         target_shape.text = str(new_text)
 
+    return True
+
+
+def replace_text_paragraphs(slide: Slide, shape_name: str, lines: list[str]) -> bool:
+    """
+    แทนที่ข้อความใน Text Box ด้วยหลาย Paragraph โดยรักษา Format ของ Paragraph แรกไว้
+    ใช้สำหรับ txt_tbl_title ที่ต้องการ 2 บรรทัดจริงๆ (ไม่ใช่แค่ word-wrap)
+    """
+    target_shape = _find_shape_recursive(slide.shapes, shape_name)
+    if not target_shape:
+        logger.warning(f"ไม่พบ Text Box ชื่อ '{shape_name}'")
+        return False
+    if not target_shape.has_text_frame:
+        logger.warning(f"Object '{shape_name}' ไม่ใช่กล่องข้อความ")
+        return False
+
+    tf = target_shape.text_frame
+    if not tf.paragraphs:
+        return False
+
+    p0 = tf.paragraphs[0]
+
+    # Set paragraph 0 to lines[0]
+    line0 = lines[0] if lines else ""
+    if p0.runs:
+        p0.runs[0].text = line0
+        for run in p0.runs[1:]:
+            run.text = ""
+    else:
+        target_shape.text = line0
+
+    # Add / update subsequent paragraphs
+    for i, line in enumerate(lines[1:], start=1):
+        existing = tf.paragraphs  # re-read after each insert
+        if i < len(existing):
+            pi = existing[i]
+            if pi.runs:
+                pi.runs[0].text = line
+                for run in pi.runs[1:]:
+                    run.text = ""
+        else:
+            # Deep-copy paragraph 0 XML, set new text, insert after last paragraph
+            new_p = deepcopy(p0._p)
+            r_els = new_p.findall(f"{{{_A_NS}}}r")
+            if r_els:
+                t_el = r_els[0].find(f"{{{_A_NS}}}t")
+                if t_el is not None:
+                    t_el.text = line
+                for r in r_els[1:]:
+                    t_sub = r.find(f"{{{_A_NS}}}t")
+                    if t_sub is not None:
+                        t_sub.text = ""
+            tf.paragraphs[-1]._p.addnext(new_p)
+
+    # Clear runs in any extra paragraphs beyond what we need
+    for extra_p in tf.paragraphs[len(lines):]:
+        for run in extra_p.runs:
+            run.text = ""
+
+    logger.info(f"อัปเดตข้อความ '{shape_name}' -> {lines}")
+    return True
+
+
+def update_date_runs(slide: Slide, shape_name: str, day: int, month_idx: int, year: int) -> bool:
+    """
+    Update the 3-run date line inside txt_report_date while preserving each run's
+    language ID and font formatting.
+
+    Expects paragraph index 2 to have exactly 3 runs:
+      run 0: day number + space  (ENGLISH_US)
+      run 1: full Thai month + space  (THAI)
+      run 2: 4-digit Buddhist year  (ENGLISH_UK)
+    """
+    target_shape = _find_shape_recursive(slide.shapes, shape_name)
+    if not target_shape:
+        logger.warning(f"ไม่พบ shape '{shape_name}'")
+        return False
+    if not target_shape.has_text_frame:
+        logger.warning(f"Shape '{shape_name}' ไม่ใช่กล่องข้อความ")
+        return False
+
+    paras = target_shape.text_frame.paragraphs
+    if len(paras) < 3:
+        logger.warning(f"'{shape_name}' มี {len(paras)} paragraphs (ต้องการอย่างน้อย 3)")
+        return False
+
+    p = paras[2]
+    if len(p.runs) < 3:
+        logger.warning(f"'{shape_name}' paragraph 2 มี {len(p.runs)} runs (ต้องการ 3)")
+        return False
+
+    p.runs[0].text = f"{day} "
+    p.runs[1].text = f"{get_thai_month(month_idx)} "
+    p.runs[2].text = str(get_buddhist_year(year))
+
+    logger.info(f"อัปเดตวันที่ '{shape_name}' -> {day} {get_thai_month(month_idx)} {get_buddhist_year(year)}")
     return True
