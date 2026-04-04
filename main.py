@@ -13,11 +13,6 @@ from src.manager import ReportManager
 from rain_services.analog_year_service import AnalogYearService
 from rain_services.path_builder import RainPathBuilder
 
-# Make extract_rain_to_excel importable without packaging
-if str(settings.paths.extract_pkg_dir) not in sys.path:
-    sys.path.insert(0, str(settings.paths.extract_pkg_dir))
-from api import run_extraction
-
 from src.task import (
     update_cover_slide,
     update_summary_slide,
@@ -76,41 +71,16 @@ def main(year: int, month: int) -> None:
     # Pre-compute t1–t6 target months once; reused for all monthly slides
     target_months = get_next_months(year, month, 6)
 
-    # --- Rain data for forecast tables (2.7, 2.8, 2.9, 2.12) ---
-    # Try pre-extracted Excel first; fall back to raster extraction if missing.
-    tbl_region_hii  = tbl_region_om   = None
-    tbl_region_om_u = tbl_region_om_l = None
-    tbl_basin_hii   = tbl_basin_om    = None
-    tbl_basin_om_u  = tbl_basin_om_l  = None
-
-    def _build_forecast_tables(svc: RainDataService) -> bool:
-        nonlocal tbl_region_hii, tbl_region_om, tbl_region_om_u, tbl_region_om_l
-        nonlocal tbl_basin_hii,  tbl_basin_om,  tbl_basin_om_u,  tbl_basin_om_l
-        tbl_region_hii  = svc.build_table("Region", "HII")
-        tbl_region_om   = svc.build_table("Region", "OM_M")
-        tbl_region_om_u = svc.build_table("Region", "OM_U")
-        tbl_region_om_l = svc.build_table("Region", "OM_L")
-        tbl_basin_hii   = svc.build_table("Basin",  "HII")
-        tbl_basin_om    = svc.build_table("Basin",  "OM_M")
-        tbl_basin_om_u  = svc.build_table("Basin",  "OM_U")
-        tbl_basin_om_l  = svc.build_table("Basin",  "OM_L")
-
-    excel_path = settings.paths.spatial_rain_extract_dir / f"rain_summary_{year}{month:02d}.xlsx"
-    if excel_path.exists():
-        logger.info(f"Loading pre-extracted data: {excel_path.name}")
-        try:
-            _build_forecast_tables(RainDataService(excel_path))
-        except Exception as e:
-            logger.warning(f"Pre-extracted Excel failed: {e} — falling back to raster extraction")
-
-    if tbl_region_hii is None:
-        logger.info("Running raster extraction (this may take a while)...")
-        try:
-            rain_data = run_extraction(year, month)
-            _build_forecast_tables(RainDataService.from_dataframes(rain_data))
-            logger.info("Raster extraction complete.")
-        except Exception as e:
-            logger.warning(f"Raster extraction failed — forecast tables will be skipped: {e}")
+    # --- Rain data service (CSV-based) ---
+    rain_svc        = RainDataService(year, month)
+    tbl_region_hii  = rain_svc.build_table("Region", "HII")
+    tbl_region_om   = rain_svc.build_table("Region", "OM_W")
+    tbl_region_om_u = rain_svc.build_table("Region", "OM_U")
+    tbl_region_om_l = rain_svc.build_table("Region", "OM_L")
+    tbl_basin_hii   = rain_svc.build_table("Basin",  "HII")
+    tbl_basin_om    = rain_svc.build_table("Basin",  "OM_W")
+    tbl_basin_om_u  = rain_svc.build_table("Basin",  "OM_U")
+    tbl_basin_om_l  = rain_svc.build_table("Basin",  "OM_L")
 
     # ------------------------------------------------------------------
     # Page 1 — cover slide

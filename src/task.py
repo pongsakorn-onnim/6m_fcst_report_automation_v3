@@ -161,7 +161,7 @@ def update_hii_anom_monthly(
         ok = False
     if tbl_data:
         name_to_data = {r["name"]: r["values"] for r in tbl_data["rows"]}
-        if not fill_rain_table(slide, "tbl_region_hii_anom", name_to_data):
+        if not fill_rain_table(slide, "tbl_region_hii_anom", name_to_data, months=months):
             ok = False
     _log_result("tag_hii_anom_monthly", ok)
     return ok
@@ -208,7 +208,7 @@ def update_om_anom_monthly(
         ok = False
     if tbl_data:
         name_to_data = {r["name"]: r["values"] for r in tbl_data["rows"]}
-        if not fill_rain_table(slide, "tbl_region_om_anom", name_to_data):
+        if not fill_rain_table(slide, "tbl_region_om_anom", name_to_data, months=months):
             ok = False
     _log_result("tag_om_anom_monthly", ok)
     return ok
@@ -255,7 +255,7 @@ def update_om_upper_anom_monthly(
         ok = False
     if tbl_data:
         name_to_data = {r["name"]: r["values"] for r in tbl_data["rows"]}
-        if not fill_rain_table(slide, "tbl_region_om_upper_anom", name_to_data):
+        if not fill_rain_table(slide, "tbl_region_om_upper_anom", name_to_data, months=months):
             ok = False
     _log_result("tag_om_upper_anom_monthly", ok)
     return ok
@@ -300,7 +300,7 @@ def update_om_lower_anom_monthly(
         ok = False
     if tbl_data:
         name_to_data = {r["name"]: r["values"] for r in tbl_data["rows"]}
-        if not fill_rain_table(slide, "tbl_region_om_lower_anom", name_to_data):
+        if not fill_rain_table(slide, "tbl_region_om_lower_anom", name_to_data, months=months):
             ok = False
     _log_result("tag_om_lower_anom_monthly", ok)
     return ok
@@ -598,13 +598,14 @@ def _update_basin_tbl_slide(
     left_shape: str,
     right_shape: str,
     tbl_data: dict | None,
+    months: list | None = None,
 ) -> bool:
     ok = replace_text_by_name(slide, "txt_header", header)
     if tbl_data:
         name_to_data = {r["name"]: r["values"] for r in tbl_data["rows"]}
-        if not fill_rain_table(slide, left_shape,  name_to_data):
+        if not fill_rain_table(slide, left_shape,  name_to_data, months=months):
             ok = False
-        if not fill_rain_table(slide, right_shape, name_to_data):
+        if not fill_rain_table(slide, right_shape, name_to_data, months=months):
             ok = False
     return ok
 
@@ -645,7 +646,7 @@ def update_hii_basin_tbl(
         f"รายลุ่มน้ำ เดือน{format_month_range(months)}"
     )
     logger.info("Updating HII basin table")
-    ok = _update_basin_tbl_slide(slide, header, "tbl_basin_hii_left", "tbl_basin_hii_right", tbl_data)
+    ok = _update_basin_tbl_slide(slide, header, "tbl_basin_hii_left", "tbl_basin_hii_right", tbl_data, months=months)
     _log_result("tag_hii_basin_tbl", ok)
     return ok
 
@@ -686,7 +687,7 @@ def update_om_basin_tbl(
         f"รายลุ่มน้ำ เดือน{format_month_range(months)}"
     )
     logger.info("Updating OM basin table")
-    ok = _update_basin_tbl_slide(slide, header, "tbl_basin_om_left", "tbl_basin_om_right", tbl_data)
+    ok = _update_basin_tbl_slide(slide, header, "tbl_basin_om_left", "tbl_basin_om_right", tbl_data, months=months)
     _log_result("tag_om_basin_tbl", ok)
     return ok
 
@@ -727,7 +728,7 @@ def update_om_upper_basin_tbl(
         f"รายลุ่มน้ำ เดือน{format_month_range(months)}"
     )
     logger.info("Updating OM upper basin table")
-    ok = _update_basin_tbl_slide(slide, header, "tbl_basin_om_upper_left", "tbl_basin_om_upper_right", tbl_data)
+    ok = _update_basin_tbl_slide(slide, header, "tbl_basin_om_upper_left", "tbl_basin_om_upper_right", tbl_data, months=months)
     _log_result("tag_om_upper_basin_tbl", ok)
     return ok
 
@@ -768,6 +769,6 @@ def update_om_lower_basin_tbl(
         f"รายลุ่มน้ำ เดือน{format_month_range(months)}"
     )
     logger.info("Updating OM lower basin table")
-    ok = _update_basin_tbl_slide(slide, header, "tbl_basin_om_lower_left", "tbl_basin_om_lower_right", tbl_data)
+    ok = _update_basin_tbl_slide(slide, header, "tbl_basin_om_lower_left", "tbl_basin_om_lower_right", tbl_data, months=months)
     _log_result("tag_om_lower_basin_tbl", ok)
     return ok

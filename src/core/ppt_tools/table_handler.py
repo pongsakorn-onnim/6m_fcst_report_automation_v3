@@ -26,6 +26,11 @@ _RPR_FONT_ELEMS = (
     f'<a:cs typeface="{_FONT}" panose="{_FONT_PANOSE}" pitchFamily="2" charset="-34"/>'
 )
 
+_THAI_MONTHS_SHORT = [
+    "ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.",
+    "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."
+]
+
 # Cell styling
 _FILL_POSITIVE  = f'<a:solidFill xmlns:a="{_NS}"><a:srgbClr val="31A1C0"><a:alpha val="20000"/></a:srgbClr></a:solidFill>'
 _FILL_NEGATIVE  = f'<a:solidFill xmlns:a="{_NS}"><a:srgbClr val="F5EAAB"/></a:solidFill>'
@@ -103,11 +108,14 @@ def _build_data_cell(tc: etree._Element, anomaly: float, pct: float) -> None:
         logger.warning("NaN value encountered in cell data — skipping cell.")
         return
 
+    anomaly = int(round(anomaly))
+    pct     = int(round(pct))
+
     # Determine case
-    if pct >= 1.0:
+    if pct >= 1:
         color_inner = _COLOR_POSITIVE
         fill_xml    = _FILL_POSITIVE
-    elif pct <= -1.0:
+    elif pct <= -1:
         color_inner = _COLOR_NEGATIVE
         fill_xml    = _FILL_NEGATIVE
     else:
@@ -143,19 +151,18 @@ def _build_data_cell(tc: etree._Element, anomaly: float, pct: float) -> None:
         p.append(pPr_copy)
 
     # ── Build text content ────────────────────────────────────
-    if -1.0 < pct < 1.0:
+    if -1 < pct < 1:
         # Single line: "ไม่เกิน ±1" (th-TH) + "%" (en-US)
         p.append(_xml_run("th-TH", "ไม่เกิน \u00b11", color_inner))
         p.append(_xml_run("en-US", "%",               color_inner))
     else:
-        pct_str  = f"{int(round(pct)):+d}"
         # Line 1: mm value — use "ไม่เกิน ±1 มม." if anomaly rounds to zero
-        if int(round(anomaly)) == 0:
+        if anomaly == 0:
             p.append(_xml_run("th-TH", "ไม่เกิน \u00b11 มม.", color_inner))
         else:
-            p.append(_xml_run("en-US", f"{int(round(anomaly)):+d}", color_inner))
+            p.append(_xml_run("en-US", f"{anomaly:+d}", color_inner))
         p.append(_xml_br(color_inner))
-        p.append(_xml_run("en-US", f"({pct_str}%)", color_inner))
+        p.append(_xml_run("en-US", f"({pct:+d}%)", color_inner))
 
 
 # ──────────────────────────────────────────────────────────
@@ -201,6 +208,25 @@ def _normalize_table_layout(table, shape_name: str) -> None:
 
 
 # ──────────────────────────────────────────────────────────
+# Header row updater
+# ──────────────────────────────────────────────────────────
+
+def _update_header_row(table, months: list) -> None:
+    """Overwrite month abbreviations in header row cols 1–6 (preserves all formatting)."""
+    tbl = table._tbl
+    rows = tbl.findall(f"{_A}tr")
+    if not rows:
+        return
+    cells = rows[0].findall(f"{_A}tc")
+    for col_offset, m in enumerate(months[:6], start=1):
+        if col_offset >= len(cells):
+            break
+        t_el = cells[col_offset].find(f".//{_A}t")
+        if t_el is not None:
+            t_el.text = _THAI_MONTHS_SHORT[m["month"] - 1]
+
+
+# ──────────────────────────────────────────────────────────
 # Public API
 # ──────────────────────────────────────────────────────────
 
@@ -240,16 +266,16 @@ def fill_rain_diff_table(
             continue
 
         val = name_to_data[row_name]
-        anomaly = float(val["anomaly"])
-        pct     = float(val["percent"])
+        anomaly = int(round(float(val["anomaly"])))
+        pct     = int(round(float(val["percent"])))
 
         tc = table.cell(row_idx, 1)._tc
 
         # Determine styling
-        if pct >= 1.0:
+        if pct >= 1:
             color_inner = _COLOR_POSITIVE
             fill_xml    = _FILL_POSITIVE
-        elif pct <= -1.0:
+        elif pct <= -1:
             color_inner = _COLOR_NEGATIVE
             fill_xml    = _FILL_NEGATIVE
         else:
@@ -278,17 +304,16 @@ def fill_rain_diff_table(
         if pPr_copy is not None:
             p.append(pPr_copy)
 
-        if -1.0 < pct < 1.0:
+        if -1 < pct < 1:
             p.append(_xml_run("th-TH", "ไม่เกิน \u00b11", color_inner))
             p.append(_xml_run("en-US", "%",               color_inner))
         else:
-            pct_str = f"{int(round(pct)):+d}"
-            if int(round(anomaly)) == 0:
+            if anomaly == 0:
                 p.append(_xml_run("th-TH", "ไม่เกิน \u00b11 มม.", color_inner))
             else:
-                p.append(_xml_run("en-US", f"{int(round(anomaly)):+d}", color_inner))
+                p.append(_xml_run("en-US", f"{anomaly:+d}", color_inner))
             p.append(_xml_br(color_inner))
-            p.append(_xml_run("en-US", f"({pct_str}%)", color_inner))
+            p.append(_xml_run("en-US", f"({pct:+d}%)", color_inner))
 
     return ok
 
@@ -297,6 +322,7 @@ def fill_rain_table(
     slide: Slide,
     shape_name: str,
     name_to_data: dict,
+    months: list | None = None,
 ) -> bool:
     """
     Fill a PPT table shape with rainfall anomaly/percent data.
@@ -306,6 +332,9 @@ def fill_rain_table(
         shape_name:   Name of the table shape (e.g. 'tbl_basin_hii_left').
         name_to_data: {thai_name: [{"anomaly": float, "percent": float}, ...]}
                       List must have 6 entries (t1–t6, matching col indices 1–6).
+        months:       Optional list of 6 month dicts from get_next_months().
+                      When provided, header row cols 1–6 are updated with short
+                      Thai month abbreviations (ม.ค., ก.พ., …).
 
     Returns True if all data rows were matched and written successfully.
     """
@@ -319,6 +348,8 @@ def fill_rain_table(
 
     table = table_shape.table
     _normalize_table_layout(table, shape_name)
+    if months:
+        _update_header_row(table, months)
     ok = True
 
     for row_idx in range(1, len(table.rows)):
