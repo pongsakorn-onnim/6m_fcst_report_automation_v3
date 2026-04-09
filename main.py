@@ -308,7 +308,7 @@ def main(year: int, month: int) -> None:
             path_fcst  = builder.build_hii_forecast_path(obs_year, obs_month, obs_year, obs_month),
             path_obs   = builder.build_obs_path(obs_year, obs_month),
             path_diff  = builder.build_diff_obs_vs_forecast_path(obs_year, obs_month, "HII"),
-            tbl_data   = build_obs_diff_table("HII", obs_year, obs_month),
+            tbl_data   = build_obs_diff_table("HII", obs_year, obs_month, init_year=year, init_month=month),
         )
 
     for slide, (obs_year, obs_month) in zip(tmd_slides, past_months_210):
@@ -319,7 +319,7 @@ def main(year: int, month: int) -> None:
             path_fcst  = builder.build_tmd_forecast_path(obs_year, obs_month, obs_year, obs_month),
             path_obs   = builder.build_obs_path(obs_year, obs_month),
             path_diff  = builder.build_diff_obs_vs_forecast_path(obs_year, obs_month, "TMD"),
-            tbl_data   = build_obs_diff_table("TMD", obs_year, obs_month),
+            tbl_data   = build_obs_diff_table("TMD", obs_year, obs_month, init_year=year, init_month=month),
         )
 
     for slide, (obs_year, obs_month) in zip(om_slides, past_months_210):
@@ -329,8 +329,8 @@ def main(year: int, month: int) -> None:
             obs_month  = obs_month,
             path_fcst  = builder.build_onemap_path(obs_year, obs_month, obs_year, obs_month, model_type="MFCST"),
             path_obs   = builder.build_obs_path(obs_year, obs_month),
-            path_diff  = builder.build_diff_obs_vs_forecast_path(obs_year, obs_month, "OM"),
-            tbl_data   = build_obs_diff_table("OM", obs_year, obs_month),
+            path_diff  = builder.build_diff_obs_vs_forecast_path(obs_year, obs_month, "OM_W"),
+            tbl_data   = build_obs_diff_table("OM_W", obs_year, obs_month, init_year=year, init_month=month),
         )
 
     for slide, (obs_year, obs_month) in zip(avg_slides, past_months_210):

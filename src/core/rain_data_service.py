@@ -61,7 +61,7 @@ def _resolve_om_col(model: str, df_columns) -> str:
 _OBS_DIFF_REGION_FILES = {
     "HII": lambda y: f"HIIObserve_forecast_region_{y}.xlsx",
     "TMD": lambda y: f"TMDObserve_forecast_region_{y}.xlsx",
-    "OM":  lambda y: f"Observe_OMWforecast_{y}.xlsx",
+    "OM_W": lambda y: f"Observe_OMWforecast_{y}.xlsx",
 }
 
 
@@ -144,8 +144,9 @@ class RainDataService:
     def build_table(self, zone_type: ZoneType, model: str) -> dict | None:
         """
         Build a PPT-ready table dict for the given zone type and model.
+        Tries senior's CSV files first; falls back to extracted Excel if missing.
 
-        Returns None (with a warning) if data cannot be loaded.
+        Returns None (with a warning) if both sources fail.
 
         Args:
             zone_type: "Region" or "Basin"
@@ -172,7 +173,55 @@ class RainDataService:
                 logger.warning(f"build_table: unknown model '{model}' — skipped.")
                 return None
         except Exception as e:
-            logger.warning(f"build_table({zone_type!r}, {model!r}) failed: {e}")
+            logger.warning(f"build_table({zone_type!r}, {model!r}) primary failed: {e} — trying fallback.")
+            return self._build_from_extracted_excel(zone_type, model)
+
+    def _build_from_extracted_excel(self, zone_type: ZoneType, model: str) -> dict | None:
+        """Fallback: read forecast table from extract_rain_to_excel output Excel."""
+        yyyymm = f"{self.year}{self.month:02d}"
+        path = rain_config.EXTRACT_RAIN_EXCEL_DIR / f"rain_summary_{yyyymm}.xlsx"
+
+        if not path.exists():
+            logger.warning(f"Fallback Excel not found: {path}")
+            return None
+
+        try:
+            df = pd.read_excel(path, sheet_name=zone_type)
+            df = df[df["model"] == model].copy()
+            if df.empty:
+                logger.warning(f"Fallback Excel: no data for model={model!r}, zone={zone_type!r} in {path.name}")
+                return None
+
+            code_col = "REG_CODE" if zone_type == "Region" else "MB_CODE"
+            name_col = "FIRST_REGI" if zone_type == "Region" else "MBASIN_T"
+
+            df = df.sort_values("lead_time")
+            sorted_leads = sorted(df["lead_time"].unique())
+
+            month_labels = []
+            for lead in sorted_leads:
+                tm = df[df["lead_time"] == lead]["target_month"].iloc[0]  # "YYYY-MM"
+                month_labels.append(THAI_MONTHS[int(str(tm).split("-")[1])])
+
+            rows_by_code: dict = {}
+            for lead in sorted_leads:
+                for _, row in df[df["lead_time"] == lead].iterrows():
+                    code = int(row[code_col])
+                    raw_name = str(row[name_col]).strip()
+                    name = _REGION_NAME_MAP.get(raw_name, raw_name) if zone_type == "Region" else raw_name
+                    if code not in rows_by_code:
+                        rows_by_code[code] = {"code": code, "name": name, "values": []}
+                    rows_by_code[code]["values"].append({
+                        "anomaly": float(row["anomaly"]),
+                        "percent": float(row["percent_anomaly"]),
+                    })
+
+            rows = [rows_by_code[c] for c in sorted(rows_by_code)]
+            logger.info(f"Fallback Excel used for build_table({zone_type!r}, {model!r})")
+            return {"zone_type": zone_type, "model": model, "months": month_labels, "rows": rows}
+
+        except Exception as e:
+            logger.warning(f"Fallback Excel read failed ({zone_type!r}, {model!r}): {e}")
             return None
 
     # ------------------------------------------------------------------
@@ -287,18 +336,24 @@ class RainDataService:
 # Obs-vs-Forecast table (Group 2.10) — module-level, region only
 # ======================================================================
 
-def build_obs_diff_table(model: str, year: int, month: int) -> dict:
+def build_obs_diff_table(
+    model: str, year: int, month: int,
+    init_year: int | None = None, init_month: int | None = None,
+) -> dict:
     """
     Load observed-vs-forecast diff data for a single past month (Group 2.10).
+    Tries senior's Excel first; falls back to extracted Excel if missing.
 
     Args:
-        model:  "HII", "TMD", or "OM"
-        year:   Observed year
-        month:  Observed month (1–12)
+        model:       "HII", "TMD", or "OM_W"
+        year:        Observed year
+        month:       Observed month (1–12)
+        init_year:   Report init year  (required for fallback file lookup)
+        init_month:  Report init month (required for fallback file lookup)
 
     Returns:
         {thai_region_short_name: {"anomaly": float, "percent": float}}
-        Returns {} if the file is missing or unreadable.
+        Returns {} if both sources fail.
     """
     filename_fn = _OBS_DIFF_REGION_FILES.get(model)
     if filename_fn is None:
@@ -307,34 +362,72 @@ def build_obs_diff_table(model: str, year: int, month: int) -> dict:
 
     path = rain_config.DIFF_REGION_EXCEL_DIR / filename_fn(year)
 
-    if not path.exists():
+    if path.exists():
+        try:
+            xl = pd.ExcelFile(path)
+            df = pd.read_excel(xl, sheet_name=xl.sheet_names[0])
+            df = df[(df["YEAR"] == year) & (df["MONTH"] == month)]
+
+            if df.empty:
+                logger.warning(
+                    f"Obs-diff ({model}): no rows for {year}-{month:02d} in {path.name}"
+                )
+            else:
+                # Normalize diff column — OMW region uses 'obs_anom_fcst'; HII/TMD use 'obs_fcst'
+                diff_col = "obs_anom_fcst" if "obs_anom_fcst" in df.columns else "obs_fcst"
+                result = {}
+                for _, row in df.iterrows():
+                    raw_name = str(row["FIRST_REGI"]).strip()
+                    name = _REGION_NAME_MAP.get(raw_name, raw_name)
+                    result[name] = {
+                        "anomaly": float(row[diff_col]),
+                        "percent": float(row["anom_per"]),
+                    }
+                return result
+
+        except Exception as e:
+            logger.warning(f"Obs-diff primary read failed ({model}, {year}-{month:02d}): {e}")
+    else:
         logger.warning(f"Obs-diff file not found: {path}")
+
+    # Fallback
+    if init_year is None or init_month is None:
+        logger.warning(f"Obs-diff fallback skipped: init_year/init_month not provided.")
+        return {}
+    return _build_obs_diff_from_extracted(model, year, month, init_year, init_month)
+
+
+def _build_obs_diff_from_extracted(
+    model: str, year: int, month: int, init_year: int, init_month: int
+) -> dict:
+    """Fallback: read obs-diff data from extract_rain_to_excel output Excel."""
+    init_yyyymm = f"{init_year}{init_month:02d}"
+    path = rain_config.EXTRACT_RAIN_EXCEL_DIR / f"obs_diff_summary_{init_yyyymm}.xlsx"
+
+    if not path.exists():
+        logger.warning(f"Fallback obs-diff Excel not found: {path}")
         return {}
 
     try:
-        xl = pd.ExcelFile(path)
-        df = pd.read_excel(xl, sheet_name=xl.sheet_names[0])
-        df = df[(df["YEAR"] == year) & (df["MONTH"] == month)]
-
+        df = pd.read_excel(path, sheet_name="ObsDiff_Region")
+        df = df[(df["model"] == model) & (df["obs_year"] == year) & (df["obs_month"] == month)]
         if df.empty:
             logger.warning(
-                f"Obs-diff ({model}): no rows for {year}-{month:02d} in {path.name}"
+                f"Fallback obs-diff: no data for model={model!r}, {year}-{month:02d} in {path.name}"
             )
             return {}
-
-        # Normalize diff column — OMW region uses 'obs_anom_fcst'; HII/TMD use 'obs_fcst'
-        diff_col = "obs_anom_fcst" if "obs_anom_fcst" in df.columns else "obs_fcst"
 
         result = {}
         for _, row in df.iterrows():
             raw_name = str(row["FIRST_REGI"]).strip()
             name = _REGION_NAME_MAP.get(raw_name, raw_name)
             result[name] = {
-                "anomaly": float(row[diff_col]),
-                "percent": float(row["anom_per"]),
+                "anomaly": float(row["anomaly"]),
+                "percent": float(row["percent_anomaly"]),
             }
+        logger.info(f"Fallback Excel used for obs-diff ({model}, {year}-{month:02d})")
         return result
 
     except Exception as e:
-        logger.error(f"Failed to read obs-diff file {path}: {e}")
+        logger.warning(f"Fallback obs-diff Excel read failed ({model}, {year}-{month:02d}): {e}")
         return {}
